@@ -1,0 +1,82 @@
+from ultralytics import YOLO
+import cv2
+
+from sort.sort import*
+from util import get_car,read_license_plate,write_csv
+mot_tracker=Sort()   # it is used to track all the vehicles in the track 
+
+results ={}  # it is an dictionary where the results are stored
+
+#loading models to run
+coco_model = YOLO('yolov8n.pt') 
+license_plate_detector=YOLO('./best.pt')
+
+vehicles=[2,3,5,7]
+# Load the video file you want to run detection on
+cap=cv2.VideoCapture('./demo videos/sample.mp4')
+
+#read frames for an video input 
+
+frame_nmr = -1
+ret=True
+while ret:
+    frame_nmr +=1
+    ret,frame=cap.read()
+    if ret :
+        results[frame_nmr]={}
+        #detect vehicles
+
+        detections = coco_model(frame)[0]
+        detections_=[]
+        for detection in detections.boxes.data.tolist():
+            x1, y1, x2, y2, score, class_id = detection
+            if int(class_id) in vehicles:
+                detections_.append([x1, y1, x2, y2, score])
+
+        #track vehicles
+        track_ids=mot_tracker.update(np.asarray(detections_))
+
+
+        #detect license plates
+        license_plates = license_plate_detector(frame)[0]
+        for license_plate in license_plates.boxes.data.tolist():
+            x1, y1, x2, y2, score, class_id = license_plate
+
+
+             #assigning the license plates to the cars
+            xcar1, ycar1, xcar2, ycar2, car_id= get_car(license_plate,track_ids)
+            
+            if car_id!=-1:
+                #cropping the license plate 
+                license_plate_crop = frame[int(y1):int(y2),int(x1):int(x2),:]
+
+                #image processing from license plates
+                license_plate_crop_gray=cv2.cvtColor(license_plate_crop,cv2.COLOR_BGR2GRAY)
+                _, license_plate_crop_thresh = cv2.threshold(license_plate_crop_gray, 64, 255, cv2.THRESH_BINARY_INV)
+
+
+                #  cv2.imshow('oricrop',license_plate_crop)
+                #  cv2.imshow('threshcrop',license_plate_crop_thresh)
+
+                #  cv2.waitKey(0)     this code is to check
+
+                # reading the license plate
+
+                license_plate_text, license_plate_text_scsore=read_license_plate(license_plate_crop_thresh) 
+
+                if license_plate_text is not None:
+                    results[frame_nmr][car_id] = {'car':{'bbox':[xcar1, ycar1, xcar2, ycar2]},
+                                                'license_plate':{'bbox':[x1, y1, x2, y2],
+                                                                    'text':license_plate_text,
+                                                                    'bbox_score':score,
+                                                                    'text_score':license_plate_text_scsore}}
+                 
+
+#write results
+write_csv(results,'./demotest3.csv')
+
+            
+             
+
+
+        
